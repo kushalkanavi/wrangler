@@ -46,6 +46,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import javax.annotation.Nullable;
 
 /**
  * Wrangler - A interactive tool for data data cleansing and transformation.
@@ -127,82 +128,25 @@ public class Wrangler extends Transform<StructuredRecord, StructuredRecord> {
     super.configurePipeline(configurer);
 
     Schema iSchema = configurer.getStageConfigurer().getInputSchema();
-
-    if (!config.field.equalsIgnoreCase("*")) {
-      validateInputSchema(iSchema);
-    }
-
-    // Validate the DSL by parsing DSL.
-    Directives directives = new TextDirectives(config.directives);
-    try {
-      directives.getSteps();
-    } catch (DirectiveParseException e) {
-      throw new IllegalArgumentException(e);
-    }
-
-    // Based on the configuration create output schema.
-    try {
-      oSchema = Schema.parseJson(config.schema);
-    } catch (IOException e) {
-      throw new IllegalArgumentException("Format of output schema specified is invalid. Please check the format.");
-    }
-
-    // Check if configured field is present in the input schema.
-    Schema inputSchema = configurer.getStageConfigurer().getInputSchema();
-    if(!config.field.equalsIgnoreCase("*") && inputSchema.getField(config.field) == null) {
-      throw new IllegalArgumentException(
-        String.format("Field '%s' configured to wrangler is not present in the input. " +
-                        "Only specify fields present in the input", config.field)
-      );
-    }
-
-    // Check if pre-condition is not null or empty and if so compile expression.
-    if (config.precondition != null && !config.precondition.trim().isEmpty()) {
-      try {
-        new Precondition(config.precondition);
-      } catch (PreconditionException e) {
-        throw new IllegalArgumentException(e.getMessage());
-      }
-    }
-
-    // Set the output schema.
-    configurer.getStageConfigurer().setOutputSchema(oSchema);
-  }
-
-  void validateInputSchema(Schema inputSchema) {
-    if (inputSchema != null) {
-      // Check the existence of field in input schema
-      Schema.Field inputSchemaField = inputSchema.getField(config.field);
-      if (inputSchemaField == null) {
-        throw new IllegalArgumentException(
-          "Field " + config.field + " is not present in the input schema");
-      }
-
-      // Check that the field type is String or Nullable String
-      Schema fieldSchema = inputSchemaField.getSchema();
-      Schema.Type fieldType = fieldSchema.isNullable() ? fieldSchema.getNonNullable().getType() : fieldSchema.getType();
-      if (!fieldType.equals(Schema.Type.STRING)) {
-        throw new IllegalArgumentException(
-          "Type for field  " + config.field + " must be String");
-      }
+    config.validate(iSchema);
+    if (!config.containsMacro("schema")) {
+      // Set the output schema.
+      configurer.getStageConfigurer().setOutputSchema(config.getSchema());
     }
   }
 
   @Override
   public void initialize(TransformContext context) throws Exception {
     super.initialize(context);
+    config.validate(context.getInputSchema());
 
     // Parse DSL and initialize the wrangle pipeline.
     Directives directives = new TextDirectives(config.directives);
     pipeline = new PipelineExecutor();
     pipeline.configure(directives, new WranglerPipelineContext(context));
 
-    // Based on the configuration create output schema.
-    try {
-      oSchema = Schema.parseJson(config.schema);
-    } catch (IOException e) {
-      throw new IllegalArgumentException("Format of output schema specified is invalid. Please check the format.");
-    }
+    // Based on the configuration create output schema.x
+    oSchema = config.getSchema();
 
     // Check if pre-condition is not null or empty and if so compile expression.
     if (config.precondition != null && !config.precondition.trim().isEmpty()) {
@@ -241,7 +185,7 @@ public class Wrangler extends Transform<StructuredRecord, StructuredRecord> {
 
     // Run through the wrangle pipeline, if there is a SkipRecord exception, don't proceed further
     // but just return without emitting any record out.
-    List<StructuredRecord> records = new ArrayList<>();
+    List<StructuredRecord> records;
     long start = System.nanoTime();
     try {
       records = pipeline.execute(Arrays.asList(row), oSchema); // we don't compute meta and statistics.
@@ -288,10 +232,12 @@ public class Wrangler extends Transform<StructuredRecord, StructuredRecord> {
     @Name("precondition")
     @Description("Precondition expression specifying filtering before applying directives (true to filter)")
     @Macro
+    @Nullable
     private String precondition;
 
     @Name("directives")
     @Description("Directives for wrangling the input records")
+    @Macro
     private String directives;
 
     @Name("field")
@@ -307,6 +253,7 @@ public class Wrangler extends Transform<StructuredRecord, StructuredRecord> {
 
     @Name("schema")
     @Description("Specifies the schema that has to be output.")
+    @Macro
     private final String schema;
 
     public Config(String precondition, String directives, String field, int threshold, String schema) {
@@ -315,6 +262,54 @@ public class Wrangler extends Transform<StructuredRecord, StructuredRecord> {
       this.field = field;
       this.threshold = threshold;
       this.schema = schema;
+    }
+
+    @Nullable
+    public Schema getSchema() {
+      try {
+        return containsMacro("schema") ? null : Schema.parseJson(schema);
+      } catch (IOException e) {
+        throw new IllegalArgumentException("Format of output schema specified is invalid. Please check the format.");
+      }
+    }
+
+    public void validate(@Nullable Schema inputSchema) {
+
+      if (!containsMacro("field") && !field.equalsIgnoreCase("*") && inputSchema != null) {
+        // Check the existence of field in input schema
+        Schema.Field inputSchemaField = inputSchema.getField(field);
+        if (inputSchemaField == null) {
+          throw new IllegalArgumentException("Field " + field + " is not present in the input schema");
+        }
+
+        // Check that the field type is String or Nullable String
+        Schema fieldSchema = inputSchemaField.getSchema();
+        Schema.Type fieldType = fieldSchema.isNullable() ?
+          fieldSchema.getNonNullable().getType() : fieldSchema.getType();
+        if (!fieldType.equals(Schema.Type.STRING)) {
+          throw new IllegalArgumentException("Type for field  " + field + " must be String");
+        }
+      }
+
+      if (!containsMacro("directives")) {
+        Directives textDirectives = new TextDirectives(directives);
+        try {
+          textDirectives.getSteps();
+        } catch (DirectiveParseException e) {
+          throw new IllegalArgumentException(e);
+        }
+      }
+
+      getSchema();
+
+      // Check if pre-condition is not null or empty and if so compile expression.
+      if (!containsMacro("precondition") && precondition != null && !precondition.trim().isEmpty()) {
+        try {
+          new Precondition(precondition);
+        } catch (PreconditionException e) {
+          throw new IllegalArgumentException(e.getMessage());
+        }
+      }
     }
   }
 }
