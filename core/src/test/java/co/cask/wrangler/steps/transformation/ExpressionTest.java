@@ -20,10 +20,22 @@ import co.cask.cdap.api.common.Bytes;
 import co.cask.wrangler.api.Record;
 import co.cask.wrangler.api.StepException;
 import co.cask.wrangler.steps.PipelineTest;
+import com.github.filosganga.geogson.gson.GeometryAdapterFactory;
+import com.github.filosganga.geogson.model.Coordinates;
+import com.github.filosganga.geogson.model.Feature;
+import com.github.filosganga.geogson.model.FeatureCollection;
+import com.github.filosganga.geogson.model.Polygon;
+import com.github.filosganga.geogson.model.positions.AreaPositions;
+import com.github.filosganga.geogson.model.positions.LinearPositions;
+import com.github.filosganga.geogson.model.positions.SinglePosition;
+import com.google.common.collect.ImmutableList;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import org.junit.Assert;
 import org.junit.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -168,6 +180,38 @@ public class ExpressionTest {
 
     records = PipelineTest.execute(directives, records);
     Assert.assertTrue(records.size() == 0);
+  }
+
+  @Test
+  public void testGeoFence() throws Exception {
+
+    Gson gson = new GsonBuilder()
+            .registerTypeAdapterFactory(new GeometryAdapterFactory())
+            .create();
+
+    List<SinglePosition> singlePositionList = new ArrayList<>();
+    singlePositionList.add(new SinglePosition(Coordinates.of(-468.28125, 51.508742458803326)));
+    singlePositionList.add(new SinglePosition(Coordinates.of(-466.083984375, 49.296471602658066)));
+    singlePositionList.add(new SinglePosition(Coordinates.of(-462.919921875, 51.590722643120145)));
+    singlePositionList.add(new SinglePosition(Coordinates.of(-468.28125, 51.508742458803326)));
+
+    AreaPositions positions = new AreaPositions(ImmutableList.of(new LinearPositions(singlePositionList)));
+    FeatureCollection fences = new FeatureCollection(ImmutableList.of(Feature.of(new Polygon(positions))));
+
+    Coordinates location = Coordinates.of(-466.083984375, 50.84757295365389);
+
+    String[] directives = new String[] {
+            "set column result geo:evaluate(lat,lon,fences)"
+    };
+
+    List<Record> records = Arrays.asList(
+            new Record("id", 123)
+            .add("lat", location.getLon())
+            .add("lon", location.getLat())
+                    .add("fences",gson.toJson(fences))
+    );
+    records = PipelineTest.execute(directives, records);
+    Assert.assertFalse((Boolean) records.get(0).getValue("result"));
   }
 }
 
