@@ -37,6 +37,14 @@ import java.util.List;
  */
 public class GeoFences {
 
+  /**
+   * Static method to be used with jexl
+   *
+   * @param latitude
+   * @param longitude
+   * @param geofence
+   * @return
+   */
   public static final Boolean evaluate(double latitude, double longitude, String geofence) {
     Coordinates location = Coordinates.of(longitude, latitude);
     Boolean inzone = false;
@@ -46,7 +54,7 @@ public class GeoFences {
 
     FeatureCollection featureCollection = gson.fromJson(geofence, FeatureCollection.class);
     for (Feature feature : featureCollection.features()) {
-      inzone = inzone || pointInside(getPolygonAsList(feature), location);
+      inzone = inzone || isPointInside(getPolygonAsList(feature), location);
 
     }
     return inzone;
@@ -71,24 +79,31 @@ public class GeoFences {
     return points;
   }
 
-  private static Boolean pointInside(List<Coordinates> polygon, Coordinates location) {
+  /**
+   * Verifies inclusion of the point inside the polygon based on the winding number algorithm.
+   *
+   * @param polygon
+   * @param location
+   * @return
+   */
+  private static Boolean isPointInside(List<Coordinates> polygon, Coordinates location) {
     if ((polygon == null) || (location == null)) {
       return false;
     }
     polygon = closePolygon(polygon);
 
-    int wn = 0;                                                               // the winding number counter
-    for (int i = 0; i < polygon.size() - 1; i++) {                            // edge from V[i] to V[i+1]
-      if (polygon.get(i).getLat() <= location.getLat()) {                     // start y <= P.y
+    int wn = 0;                                                                 // the winding number counter
+    for (int i = 0; i < polygon.size() - 1; i++) {                              // edge from V[i] to V[i+1]
+      if (polygon.get(i).getLat() <= location.getLat()) {                       // start y <= P.y
         if (polygon.get(i + 1).getLat() > location.getLat()) {                  // an upward crossing
-          if (isLeft(polygon.get(i), polygon.get(i + 1), location) > 0.0) {    // P left of edge
-            ++wn;                                                             // have a valid up intersect
+          if (isLeft(polygon.get(i), polygon.get(i + 1), location) > 0.0) {     // P left of edge
+            ++wn;                                                               // have a valid up intersect
           }
         }
-      } else {                                                                // start y > P.y (no test needed)
+      } else {                                                                  // start y > P.y (no test needed)
         if (polygon.get(i + 1).getLat() <= location.getLat()) {                 // a downward crossing
-          if (isLeft(polygon.get(i), polygon.get(i + 1), location) < 0.0) {    // P right of edge
-            --wn;                                                             // have a valid down intersect
+          if (isLeft(polygon.get(i), polygon.get(i + 1), location) < 0.0) {     // P right of edge
+            --wn;                                                               // have a valid down intersect
           }
         }
       }
