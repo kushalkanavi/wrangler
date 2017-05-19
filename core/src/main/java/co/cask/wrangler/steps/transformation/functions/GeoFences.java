@@ -18,8 +18,6 @@
 
 package co.cask.wrangler.steps.transformation.functions;
 
-import co.cask.wrangler.utils.openGts.GeoPoint;
-import co.cask.wrangler.utils.openGts.GeoPolygon;
 import com.github.filosganga.geogson.gson.GeometryAdapterFactory;
 import com.github.filosganga.geogson.model.Coordinates;
 import com.github.filosganga.geogson.model.Feature;
@@ -35,46 +33,87 @@ import java.util.Iterator;
 import java.util.List;
 
 /**
- *
+ * GeoFencing check based on location and polygon
  */
 public class GeoFences {
 
-    public static final Boolean evaluate(double latitude, double longitude, String geofence){
-        return evaluate(new Double(latitude).longValue(), new Double(longitude).longValue(), geofence);
+  public static final Boolean evaluate(double latitude, double longitude, String geofence) {
+    Coordinates location = Coordinates.of(longitude, latitude);
+    Boolean inzone = false;
+    Gson gson = new GsonBuilder()
+        .registerTypeAdapterFactory(new GeometryAdapterFactory())
+        .create();
+
+    FeatureCollection featureCollection = gson.fromJson(geofence, FeatureCollection.class);
+    for (Feature feature : featureCollection.features()) {
+      inzone = inzone || pointInside(getPolygonAsList(feature), location);
+
     }
+    return inzone;
+  }
 
-    public static final Boolean evaluate(String latitude, String longitude, String geofence){
-        return evaluate(Long.parseLong(latitude), Long.parseLong(longitude), geofence);
+  public static final Boolean evaluate(String latitude, String longitude, String geofence) {
+    return evaluate(Double.parseDouble(latitude), Double.parseDouble(longitude), geofence);
+  }
+
+  private static List<Coordinates> getPolygonAsList(Feature feature) {
+    List<Coordinates> points = new ArrayList<>();
+    Iterable<? extends Positions> positions = feature.geometry().positions().children();
+    Iterator positionsIterator = positions.iterator();
+    while (positionsIterator.hasNext()) {
+      LinearPositions position = (LinearPositions) positionsIterator.next();
+      Iterator<SinglePosition> singlePositionIterator = position.children().iterator();
+      while (singlePositionIterator.hasNext()) {
+        Coordinates coordinates = singlePositionIterator.next().coordinates();
+        points.add(coordinates);
+      }
     }
+    return points;
+  }
 
-    public static final Boolean evaluate(long latitude, long longitude, String geofence){
-        GeoPoint location = new GeoPoint(latitude, longitude);
-        Boolean inzone = false;
-        Gson gson = new GsonBuilder()
-                .registerTypeAdapterFactory(new GeometryAdapterFactory())
-                .create();
+  private static Boolean pointInside(List<Coordinates> polygon, Coordinates location) {
+    if ((polygon == null) || (location == null)) {
+      return false;
+    }
+    polygon = closePolygon(polygon);
 
-        List<GeoPolygon> fences = new ArrayList<>();
-        FeatureCollection featureCollection = gson.fromJson(geofence, FeatureCollection.class);
-
-        for(Feature feature : featureCollection.features()){
-            List<GeoPoint> points = new ArrayList<>();
-            Iterable<? extends Positions> positions = feature.geometry().positions().children();
-            Iterator i$1 = positions.iterator();
-            while (i$1.hasNext()){
-                LinearPositions position = (LinearPositions) i$1.next();
-                Iterator<SinglePosition> i$2 = position.children().iterator();
-                while(i$2.hasNext()){
-                    Coordinates coordinates = i$2.next().coordinates();
-                    points.add(new GeoPoint(coordinates.getLat(), coordinates.getLon()));
-                }
-            }
-            fences.add(new GeoPolygon(points));
+    int wn = 0;                                                               // the winding number counter
+    for (int i = 0; i < polygon.size() - 1; i++) {                            // edge from V[i] to V[i+1]
+      if (polygon.get(i).getLat() <= location.getLat()) {                     // start y <= P.y
+        if (polygon.get(i + 1).getLat() > location.getLat()) {                  // an upward crossing
+          if (isLeft(polygon.get(i), polygon.get(i + 1), location) > 0.0) {    // P left of edge
+            ++wn;                                                             // have a valid up intersect
+          }
         }
-
-        for (GeoPolygon fence: fences){
-            inzone = inzone || fence.isPointInside(location);
+      } else {                                                                // start y > P.y (no test needed)
+        if (polygon.get(i + 1).getLat() <= location.getLat()) {                 // a downward crossing
+          if (isLeft(polygon.get(i), polygon.get(i + 1), location) < 0.0) {    // P right of edge
+            --wn;                                                             // have a valid down intersect
+          }
         }
-        return inzone;
+      }
     }
+    return (wn != 0);
+  }
+
+  private static double isLeft(Coordinates gp0, Coordinates gp1, Coordinates gpC) {
+    double val = (gp1.getLon() - gp0.getLon()) * (gpC.getLat() - gp0.getLat()) -
+        (gpC.getLon() - gp0.getLon()) * (gp1.getLat() - gp0.getLat());
+    return val;
+  }
+
+  private static List<Coordinates> closePolygon(List<Coordinates> polygon) {
+    if (polygon.isEmpty()) {
+      return polygon;
+    } else if (polygon.size() < 3) {
+      return polygon;
+    } else {
+      if (polygon.get(0).equals(polygon.get(polygon.size() - 1))) {
+        return polygon;
+      } else {
+        polygon.add(polygon.get(0));
+        return polygon;
+      }
+    }
+  }
 }

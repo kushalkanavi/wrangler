@@ -184,21 +184,20 @@ public class ExpressionTest {
 
   @Test
   public void testGeoFence() throws Exception {
-
     Gson gson = new GsonBuilder()
             .registerTypeAdapterFactory(new GeometryAdapterFactory())
             .create();
 
     List<SinglePosition> singlePositionList = new ArrayList<>();
-    singlePositionList.add(new SinglePosition(Coordinates.of(-468.28125, 51.508742458803326)));
-    singlePositionList.add(new SinglePosition(Coordinates.of(-466.083984375, 49.296471602658066)));
-    singlePositionList.add(new SinglePosition(Coordinates.of(-462.919921875, 51.590722643120145)));
-    singlePositionList.add(new SinglePosition(Coordinates.of(-468.28125, 51.508742458803326)));
+    singlePositionList.add(new SinglePosition(Coordinates.of(-466.14990234375, 43.8503744993026)));
+    singlePositionList.add(new SinglePosition(Coordinates.of(-464.1064453125, 42.76314586689492)));
+    singlePositionList.add(new SinglePosition(Coordinates.of(-462.41455078125, 43.628123412124616)));
+    singlePositionList.add(new SinglePosition(Coordinates.of(-466.14990234375, 43.8503744993026)));
 
     AreaPositions positions = new AreaPositions(ImmutableList.of(new LinearPositions(singlePositionList)));
     FeatureCollection fences = new FeatureCollection(ImmutableList.of(Feature.of(new Polygon(positions))));
 
-    Coordinates location = Coordinates.of(-466.083984375, 50.84757295365389);
+    Coordinates location = Coordinates.of(-462.49145507812494, 43.46089378008257);
 
     String[] directives = new String[] {
             "set column result geo:evaluate(lat,lon,fences)"
@@ -206,8 +205,8 @@ public class ExpressionTest {
 
     List<Record> records = Arrays.asList(
             new Record("id", 123)
-            .add("lat", location.getLon())
-            .add("lon", location.getLat())
+            .add("lon", location.getLon())
+            .add("lat", location.getLat())
                     .add("fences",gson.toJson(fences))
     );
     records = PipelineTest.execute(directives, records);
